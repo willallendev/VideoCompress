@@ -179,13 +179,11 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
             Utility.getPathUrl("\(Utility.basePath())/\(Utility.getFileName(path)).\(sourceVideoType)")
         
         let timescale = sourceVideoAsset.duration.timescale
-        let minStartTime = Double(startTime ?? 0)
-        
+
         let videoDuration = sourceVideoAsset.duration.seconds
-        let minDuration = Double(duration ?? videoDuration)
-        let maxDurationTime = minStartTime + minDuration < videoDuration ? minDuration : videoDuration
+        let maxDurationTime = (duration ?? videoDuration < videoDuration ? duration : videoDuration) ?? videoDuration
         
-        let cmStartTime = CMTimeMakeWithSeconds(minStartTime, preferredTimescale: timescale)
+        let cmStartTime = CMTimeMakeWithSeconds(0, preferredTimescale: timescale)
         let cmDurationTime = CMTimeMakeWithSeconds(maxDurationTime, preferredTimescale: timescale)
         let timeRange: CMTimeRange = CMTimeRangeMake(start: cmStartTime, duration: cmDurationTime)
         
@@ -198,6 +196,7 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
         exporter.outputURL = compressionUrl
         exporter.outputFileType = AVFileType.mp4
         exporter.shouldOptimizeForNetworkUse = true
+        exporter.timeRange = timeRange
         
         if frameRate != nil {
             let videoComposition = AVMutableVideoComposition(propertiesOf: sourceVideoAsset)
@@ -205,9 +204,6 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
             exporter.videoComposition = videoComposition
         }
         
-        if !isIncludeAudio {
-            exporter.timeRange = timeRange
-        }
         
         Utility.deleteFile(compressionUrl.absoluteString)
         
