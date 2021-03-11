@@ -35,8 +35,8 @@ class MediaInfo {
     path = json['path'];
     title = json['title'];
     author = json['author'];
-    width = json['width'];
-    height = json['height'];
+    width = (json['width'] as double).truncate();
+    height = (json['height'] as double).truncate();
     orientation = json['orientation'];
     filesize = json['filesize'];
     duration = double.tryParse('${json['duration']}');
