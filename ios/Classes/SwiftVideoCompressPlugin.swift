@@ -122,28 +122,28 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
             "duration":duration,
             "filesize":filesize,
             "orientation":orientation
-            ] as [String : Any?]
+        ] as [String : Any?]
         return dictionary
     }
-    
+
     private func getMediaInfo(_ path: String,_ result: FlutterResult) {
         let json = getMediaInfoJson(path)
         let string = Utility.keyValueToJson(json)
         result(string)
     }
-    
-    
+
+
     @objc private func updateProgress(timer:Timer) {
         let asset = timer.userInfo as! AVAssetExportSession
         if(!stopCommand) {
             channel.invokeMethod("updateProgress", arguments: "\(String(describing: asset.progress * 100))")
         }
     }
-    
+
     private func getExportPreset(_ quality: NSNumber)->String {
         switch(quality) {
         case 1:
-            return AVAssetExportPresetLowQuality    
+            return AVAssetExportPresetLowQuality
         case 2:
             return AVAssetExportPresetMediumQuality
         case 3:
@@ -152,64 +152,61 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
             return AVAssetExportPresetMediumQuality
         }
     }
-    
+
     private func getComposition(_ isIncludeAudio: Bool,_ timeRange: CMTimeRange, _ sourceVideoTrack: AVAssetTrack)->AVAsset {
         let composition = AVMutableComposition()
         if !isIncludeAudio {
             let compressionVideoTrack = composition.addMutableTrack(withMediaType: AVMediaType.video, preferredTrackID: kCMPersistentTrackID_Invalid)
             compressionVideoTrack!.preferredTransform = sourceVideoTrack.preferredTransform
+            compressionVideoTrack!.extendedLanguageTag = sourceVideoTrack.extendedLanguageTag
+            compressionVideoTrack!.languageCode = sourceVideoTrack.languageCode
+
             try? compressionVideoTrack!.insertTimeRange(timeRange, of: sourceVideoTrack, at: CMTime.zero)
         } else {
             return sourceVideoTrack.asset!
         }
-        
-        return composition    
+
+        return composition
     }
-    
+
     private func compressVideo(_ path: String,_ quality: NSNumber,_ deleteOrigin: Bool,_ startTime: Double?,
                                _ duration: Double?,_ includeAudio: Bool?,_ frameRate: Int?,
                                _ result: @escaping FlutterResult) {
         let sourceVideoUrl = Utility.getPathUrl(path)
         let sourceVideoType = "mp4"
-        
+
         let sourceVideoAsset = avController.getVideoAsset(sourceVideoUrl)
         let sourceVideoTrack = avController.getTrack(sourceVideoAsset)
-        
+
         let compressionUrl =
             Utility.getPathUrl("\(Utility.basePath())/\(Utility.getFileName(path)).\(sourceVideoType)")
-        
+
         let timescale = sourceVideoAsset.duration.timescale
 
         let videoDuration = sourceVideoAsset.duration.seconds
         let maxDurationTime = (duration ?? videoDuration < videoDuration ? duration : videoDuration) ?? videoDuration
-        
+
         let cmStartTime = CMTimeMakeWithSeconds(0, preferredTimescale: timescale)
         let cmDurationTime = CMTimeMakeWithSeconds(maxDurationTime, preferredTimescale: timescale)
         let timeRange: CMTimeRange = CMTimeRangeMake(start: cmStartTime, duration: cmDurationTime)
-        
+
         let isIncludeAudio = includeAudio != nil ? includeAudio! : true
-        
+
         let session = getComposition(isIncludeAudio, timeRange, sourceVideoTrack!)
-        
+
         let exporter = AVAssetExportSession(asset: session, presetName: getExportPreset(quality))!
-        
+
         exporter.outputURL = compressionUrl
         exporter.outputFileType = AVFileType.mp4
         exporter.shouldOptimizeForNetworkUse = true
         exporter.timeRange = timeRange
-        
-        if frameRate != nil {
-            let videoComposition = AVMutableVideoComposition(propertiesOf: sourceVideoAsset)
-            videoComposition.frameDuration = CMTimeMake(value: 1, timescale: Int32(frameRate!))
-            exporter.videoComposition = videoComposition
-        }
-        
-        
+
+
         Utility.deleteFile(compressionUrl.absoluteString)
-        
+
         let timer = Timer.scheduledTimer(timeInterval: 0.1, target: self, selector: #selector(self.updateProgress),
                                          userInfo: exporter, repeats: true)
-        
+
         exporter.exportAsynchronously(completionHandler: {
             if(self.stopCommand) {
                 timer.invalidate()
@@ -239,7 +236,49 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
             result(jsonString)
         })
     }
-    
+
+
+    private func generateWidthAndHeight(
+        width: CGFloat,
+        height: CGFloat,
+        keepOriginalResolution: Bool
+    ) -> (width: Int, height: Int) {
+
+
+        let MIN_HEIGHT = 640.0
+        let MIN_WIDTH = 720.0
+
+        if (keepOriginalResolution) {
+            return (Int(width), Int(height))
+        }
+
+        var newWidth: Int
+        var newHeight: Int
+
+        if width >= 1920 || height >= 1920 {
+
+            newWidth = Int(width * 0.5 / 16) * 16
+            newHeight = Int(height * 0.5 / 16 ) * 16
+
+        } else if width >= 1280 || height >= 1280 {
+            newWidth = Int(width * 0.75 / 16) * 16
+            newHeight = Int(height * 0.75 / 16) * 16
+        } else if width >= 960 || height >= 960 {
+            if(width > height){
+                newWidth = Int(MIN_HEIGHT * 0.95 / 16) * 16
+                newHeight = Int(MIN_WIDTH * 0.95 / 16) * 16
+            } else {
+                newWidth = Int(MIN_WIDTH * 0.95 / 16) * 16
+                newHeight = Int(MIN_HEIGHT * 0.95 / 16) * 16
+            }
+        } else {
+            newWidth = Int(width * 0.9 / 16) * 16
+            newHeight = Int(height * 0.9 / 16) * 16
+        }
+
+        return (newWidth, newHeight)
+    }
+
     private func cancelCompression(_ result: FlutterResult) {
         exporter?.cancelExport()
         stopCommand = true
