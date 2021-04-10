@@ -51,7 +51,7 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
             let startTime = args!["startTime"] as? Double
             let duration = args!["duration"] as? Double
             let includeAudio = args!["includeAudio"] as? Bool
-            compressVideo(path, quality, deleteOrigin, startTime, duration, includeAudio,
+            compressVideoPartially(path, quality, deleteOrigin, startTime, duration, includeAudio,
                     result)
         case "cancelCompression":
             cancelCompression(result)
