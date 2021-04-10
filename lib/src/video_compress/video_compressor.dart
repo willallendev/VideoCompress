@@ -161,6 +161,62 @@ extension Compress on IVideoCompress {
     }
   }
 
+  /// compress video from [path]
+  /// compress video from [path] return [Future<MediaInfo>]
+  ///
+  /// you can choose its quality by [quality],
+  /// determine whether to delete his source file by [deleteOrigin]
+  /// optional parameters [startTime] [duration] [includeAudio] [frameRate]
+  ///
+  /// ## example
+  /// ```dart
+  /// final info = await _flutterVideoCompress.compressVideo(
+  ///   file.path,
+  ///   deleteOrigin: true,
+  /// );
+  /// debugPrint(info.toJson());
+  /// ```
+  Future<MediaInfo> compressVideoPartially(
+      String path, {
+        VideoQuality quality = VideoQuality.DefaultQuality,
+        bool deleteOrigin = false,
+        int startTime,
+        int duration,
+        bool includeAudio,
+      }) async {
+    assert(path != null);
+    if (isCompressing) {
+      throw StateError('''VideoCompress Error: 
+      Method: compressVideo
+      Already have a compression process, you need to wait for the process to finish or stop it''');
+    }
+
+    if (compressProgress$.notSubscribed) {
+      debugPrint('''VideoCompress: You can try to subscribe to the 
+      compressProgress\$ stream to know the compressing state.''');
+    }
+    // ignore: invalid_use_of_protected_member
+    setProcessingStatus(true);
+    final jsonStr = await _invoke<String>('compressVideo', {
+      'path': path,
+      'quality': quality.index,
+      'deleteOrigin': deleteOrigin,
+      'startTime': startTime,
+      'duration': duration,
+      'includeAudio': includeAudio,
+    });
+
+    // ignore: invalid_use_of_protected_member
+    setProcessingStatus(false);
+
+    if (jsonStr != null) {
+      final jsonMap = json.decode(jsonStr);
+      return MediaInfo.fromJson(jsonMap);
+    } else {
+      return null;
+    }
+  }
+
   /// stop compressing the file that is currently being compressed.
   /// If there is no compression process, nothing will happen.
   Future<void> cancelCompression() async {
