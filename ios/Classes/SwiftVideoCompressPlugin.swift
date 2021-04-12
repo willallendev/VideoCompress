@@ -171,8 +171,6 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
         if !isIncludeAudio {
             let compressionVideoTrack = composition.addMutableTrack(withMediaType: AVMediaType.video, preferredTrackID: kCMPersistentTrackID_Invalid)
             compressionVideoTrack!.preferredTransform = sourceVideoTrack.preferredTransform
-            compressionVideoTrack!.extendedLanguageTag = sourceVideoTrack.extendedLanguageTag
-            compressionVideoTrack!.languageCode = sourceVideoTrack.languageCode
 
             try? compressionVideoTrack!.insertTimeRange(timeRange, of: sourceVideoTrack, at: CMTime.zero)
         } else {
@@ -320,48 +318,6 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
             let jsonString = Utility.keyValueToJson(json)
             result(jsonString)
         })
-    }
-
-
-    private func generateWidthAndHeight(
-            width: CGFloat,
-            height: CGFloat,
-            keepOriginalResolution: Bool
-    ) -> (width: Int, height: Int) {
-
-
-        let MIN_HEIGHT = 640.0
-        let MIN_WIDTH = 720.0
-
-        if (keepOriginalResolution) {
-            return (Int(width), Int(height))
-        }
-
-        var newWidth: Int
-        var newHeight: Int
-
-        if width >= 1920 || height >= 1920 {
-
-            newWidth = Int(width * 0.5 / 16) * 16
-            newHeight = Int(height * 0.5 / 16) * 16
-
-        } else if width >= 1280 || height >= 1280 {
-            newWidth = Int(width * 0.75 / 16) * 16
-            newHeight = Int(height * 0.75 / 16) * 16
-        } else if width >= 960 || height >= 960 {
-            if (width > height) {
-                newWidth = Int(MIN_HEIGHT * 0.95 / 16) * 16
-                newHeight = Int(MIN_WIDTH * 0.95 / 16) * 16
-            } else {
-                newWidth = Int(MIN_WIDTH * 0.95 / 16) * 16
-                newHeight = Int(MIN_HEIGHT * 0.95 / 16) * 16
-            }
-        } else {
-            newWidth = Int(width * 0.9 / 16) * 16
-            newHeight = Int(height * 0.9 / 16) * 16
-        }
-
-        return (newWidth, newHeight)
     }
 
     private func cancelCompression(_ result: FlutterResult) {
