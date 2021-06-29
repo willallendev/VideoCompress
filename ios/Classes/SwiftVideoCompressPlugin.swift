@@ -1,329 +1,268 @@
+import UIKit
 import Flutter
+import Foundation
 import AVFoundation
+import Photos
 
-public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
-    private let channelName = "video_compress"
-    private var exporter: AVAssetExportSession? = nil
-    private var stopCommand = false
-    private let channel: FlutterMethodChannel
-    private let avController = AvController()
+@UIApplicationMain
+@objc class AppDelegate: FlutterAppDelegate {
+    override func application(
+            _ application: UIApplication,
+            didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> Bool {
 
-    init(channel: FlutterMethodChannel) {
-        self.channel = channel
-    }
-
-    public static func register(with registrar: FlutterPluginRegistrar) {
-        let channel = FlutterMethodChannel(name: "video_compress", binaryMessenger: registrar.messenger())
-        let instance = SwiftVideoCompressPlugin(channel: channel)
-        registrar.addMethodCallDelegate(instance, channel: channel)
-    }
-
-    public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-        let args = call.arguments as? Dictionary<String, Any>
-        switch call.method {
-        case "getByteThumbnail":
-            let path = args!["path"] as! String
-            let quality = args!["quality"] as! NSNumber
-            let position = args!["position"] as! NSNumber
-            getByteThumbnail(path, quality, position, result)
-        case "getFileThumbnail":
-            let path = args!["path"] as! String
-            let quality = args!["quality"] as! NSNumber
-            let position = args!["position"] as! NSNumber
-            getFileThumbnail(path, quality, position, result)
-        case "getMediaInfo":
-            let path = args!["path"] as! String
-            getMediaInfo(path, result)
-        case "compressVideo":
-            let path = args!["path"] as! String
-            let quality = args!["quality"] as! NSNumber
-            let deleteOrigin = args!["deleteOrigin"] as! Bool
-            let startTime = args!["startTime"] as? Double
-            let duration = args!["duration"] as? Double
-            let includeAudio = args!["includeAudio"] as? Bool
-            let frameRate = args!["frameRate"] as? Int
-            compressVideo(path, quality, deleteOrigin, startTime, duration, includeAudio,
-                    frameRate, result)
-        case "compressVideoPartially":
-            let path = args!["path"] as! String
-            let quality = args!["quality"] as! NSNumber
-            let deleteOrigin = args!["deleteOrigin"] as! Bool
-            let startTime = args!["startTime"] as? Double
-            let duration = args!["duration"] as? Double
-            let includeAudio = args!["includeAudio"] as? Bool
-            compressVideoPartially(path, quality, deleteOrigin, startTime, duration, includeAudio,
-                    result)
-        case "cancelCompression":
-            cancelCompression(result)
-        case "deleteAllCache":
-            Utility.deleteFile(Utility.basePath(), clear: true)
-            result(true)
-        case "setLogLevel":
-            result(true)
-        default:
-            result(FlutterMethodNotImplemented)
-        }
-    }
-
-    private func getBitMap(_ path: String, _ quality: NSNumber, _ position: NSNumber, _ result: FlutterResult) -> Data? {
-        let url = Utility.getPathUrl(path)
-        let asset = avController.getVideoAsset(url)
-        guard let track = avController.getTrack(asset) else {
-            return nil
-        }
-
-        let assetImgGenerate = AVAssetImageGenerator(asset: asset)
-        assetImgGenerate.appliesPreferredTrackTransform = true
-
-        let timeScale = CMTimeScale(track.nominalFrameRate)
-        let time = CMTimeMakeWithSeconds(Float64(truncating: position), preferredTimescale: timeScale)
-        guard let img = try? assetImgGenerate.copyCGImage(at: time, actualTime: nil) else {
-            return nil
-        }
-        let thumbnail = UIImage(cgImage: img)
-        let compressionQuality = CGFloat(0.01 * Double(truncating: quality))
-        return thumbnail.jpegData(compressionQuality: compressionQuality)
-    }
-
-    private func getByteThumbnail(_ path: String, _ quality: NSNumber, _ position: NSNumber, _ result: FlutterResult) {
-        if let bitmap = getBitMap(path, quality, position, result) {
-            result(bitmap)
-        }
-    }
-
-    private func getFileThumbnail(_ path: String, _ quality: NSNumber, _ position: NSNumber, _ result: FlutterResult) {
-        let fileName = Utility.getFileName(path)
-        let url = Utility.getPathUrl("\(Utility.basePath())/\(fileName).jpg")
-        Utility.deleteFile(path)
-        if let bitmap = getBitMap(path, quality, position, result) {
-            guard (try? bitmap.write(to: url)) != nil else {
-                return result(FlutterError(code: channelName, message: "getFileThumbnail error", details: "getFileThumbnail error"))
+        let controller: FlutterViewController = window?.rootViewController as! FlutterViewController
+        let appChannel = FlutterMethodChannel(name: "com.vinofyapp", binaryMessenger: controller.binaryMessenger)
+        appChannel.setMethodCallHandler({
+            [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) -> Void in
+            // Note: this method is invoked on the UI thread.
+            if call.method == "writeVideofile" {
+                let video = VideoGeneratorService()
+                guard let args = call.arguments as? [String: Any] else {
+                    result(FlutterError(code: "arguments_not_found", message: "the arguments is not found.", details: nil))
+                    return
+                }
+                guard let srcName = args["srcFilePath"] as? String else {
+                    result(FlutterError(code: "src_file_path_not_found", message: "the src file path sr is not found.", details: nil))
+                    return
+                }
+                guard let destName = args["destFilePath"] as? String else {
+                    result(FlutterError(code: "dest_file_path_not_found", message: "the dest file path is not found.", details: nil))
+                    return
+                }
+                guard let processing = args["processing"] as? [String: [String: Any]] else {
+                    result(FlutterError(code: "processing_data_not_found", message: "the processing is not found.", details: nil))
+                    return
+                }
+                video.writeVideofile(srcPath: srcName, destPath: destName, processing: processing, result: result)
+            } else {
+                result(FlutterMethodNotImplemented)
             }
-            result(Utility.excludeFileProtocol(url.absoluteString))
-        }
+
+        })
+
+        GeneratedPluginRegistrant.register(with: self)
+        return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
 
-    public func getMediaInfoJson(_ path: String) -> [String: Any?] {
-        let url = Utility.getPathUrl(path)
-        let asset = avController.getVideoAsset(url)
-        guard let track = avController.getTrack(asset) else {
-            return [:]
-        }
+}
 
-        let playerItem = AVPlayerItem(url: url)
-        let metadataAsset = playerItem.asset
+public protocol VideoGeneratorServiceInterface {
+    func writeVideofile(srcPath: String, destPath: String, processing: [String: [String: Any]], result: @escaping FlutterResult)
+}
 
-        let orientation = avController.getVideoOrientation(path)
+public class VideoGeneratorService: VideoGeneratorServiceInterface {
+    public func writeVideofile(srcPath: String, destPath: String, processing: [String: [String: Any]], result: @escaping FlutterResult) {
+        let fileURL = URL(fileURLWithPath: srcPath)
 
-        let title = avController.getMetaDataByTag(metadataAsset, key: "title")
-        let author = avController.getMetaDataByTag(metadataAsset, key: "author")
-
-        let duration = asset.duration.seconds * 1000
-        let filesize = track.totalSampleDataLength
-
-        let size = track.naturalSize.applying(track.preferredTransform)
-
-        let width = abs(size.width)
-        let height = abs(size.height)
-
-        let dictionary = [
-            "path": Utility.excludeFileProtocol(path),
-            "title": title,
-            "author": author,
-            "width": width,
-            "height": height,
-            "duration": duration,
-            "filesize": filesize,
-            "orientation": orientation
-        ] as [String: Any?]
-        return dictionary
-    }
-
-    private func getMediaInfo(_ path: String, _ result: FlutterResult) {
-        let json = getMediaInfoJson(path)
-        let string = Utility.keyValueToJson(json)
-        result(string)
-    }
-
-
-    @objc private func updateProgress(timer: Timer) {
-        let asset = timer.userInfo as! AVAssetExportSession
-        if (!stopCommand) {
-            channel.invokeMethod("updateProgress", arguments: "\(String(describing: asset.progress * 100))")
-        }
-    }
-
-    private func getExportPreset(_ quality: NSNumber) -> String {
-        switch (quality) {
-        case 1:
-            return AVAssetExportPresetLowQuality
-        case 2:
-            return AVAssetExportPresetMediumQuality
-        case 3:
-            return AVAssetExportPresetHighestQuality
-        default:
-            return AVAssetExportPresetMediumQuality
-        }
-    }
-
-    private func getComposition(_ isIncludeAudio: Bool, _ timeRange: CMTimeRange, _ sourceVideoTrack: AVAssetTrack) -> AVAsset {
         let composition = AVMutableComposition()
-        if !isIncludeAudio {
-            let compressionVideoTrack = composition.addMutableTrack(withMediaType: AVMediaType.video, preferredTrackID: kCMPersistentTrackID_Invalid)
-            compressionVideoTrack!.preferredTransform = sourceVideoTrack.preferredTransform
+        var vidAsset = AVURLAsset(url: fileURL, options: nil)
 
-            try? compressionVideoTrack!.insertTimeRange(timeRange, of: sourceVideoTrack, at: CMTime.zero)
-        } else {
-            return sourceVideoTrack.asset!
+        // get video track
+        let vtrack = vidAsset.tracks(withMediaType: AVMediaType.video)
+        print("eee")
+        let videoTrack: AVAssetTrack = vtrack[0]
+        print("tabunn")
+        let vidDuration = videoTrack.timeRange.duration
+        let vidTimerange = CMTimeRangeMake(start: CMTime.zero, duration: vidAsset.duration)
+
+        var error: NSError?
+        guard let compositionvideoTrack: AVMutableCompositionTrack = composition.addMutableTrack(withMediaType: AVMediaType.video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            result(FlutterError(code: "video_processing_failed",
+                    message: "video processing is failed.",
+                    details: nil))
+            return
         }
-
-        return composition
-    }
-
-    private func compressVideo(_ path: String, _ quality: NSNumber, _ deleteOrigin: Bool, _ startTime: Double?,
-                               _ duration: Double?, _ includeAudio: Bool?, _ frameRate: Int?,
-                               _ result: @escaping FlutterResult) {
-        let sourceVideoUrl = Utility.getPathUrl(path)
-        let sourceVideoType = "mp4"
-
-        let sourceVideoAsset = avController.getVideoAsset(sourceVideoUrl)
-        let sourceVideoTrack = avController.getTrack(sourceVideoAsset)
-
-        let compressionUrl =
-                Utility.getPathUrl("\(Utility.basePath())/\(Utility.getFileName(path)).\(sourceVideoType)")
-
-        let timescale = sourceVideoAsset.duration.timescale
-
-        let videoDuration = sourceVideoAsset.duration.seconds
-        let maxDurationTime = (duration ?? videoDuration < videoDuration ? duration : videoDuration) ?? videoDuration
-
-        let cmStartTime = CMTimeMakeWithSeconds(0, preferredTimescale: timescale)
-        let cmDurationTime = CMTimeMakeWithSeconds(maxDurationTime, preferredTimescale: timescale)
-        let timeRange: CMTimeRange = CMTimeRangeMake(start: cmStartTime, duration: cmDurationTime)
-
-        let isIncludeAudio = includeAudio != nil ? includeAudio! : true
-
-        let session = getComposition(isIncludeAudio, timeRange, sourceVideoTrack!)
-
-        let exporter = AVAssetExportSession(asset: session, presetName: getExportPreset(quality))!
-
-        exporter.outputURL = compressionUrl
-        exporter.outputFileType = AVFileType.mp4
-        exporter.shouldOptimizeForNetworkUse = true
-        exporter.timeRange = timeRange
-
-        if frameRate != nil {
-            let videoComposition = AVMutableVideoComposition(propertiesOf: sourceVideoAsset)
-            videoComposition.frameDuration = CMTimeMake(value: 1, timescale: Int32(frameRate!))
-            exporter.videoComposition = videoComposition
-        }
-
-
-        Utility.deleteFile(compressionUrl.absoluteString)
-
-        let timer = Timer.scheduledTimer(timeInterval: 0.1, target: self, selector: #selector(self.updateProgress),
-                userInfo: exporter, repeats: true)
-
-        exporter.exportAsynchronously(completionHandler: {
-            if (self.stopCommand) {
-                timer.invalidate()
-                self.stopCommand = false
-                var json = self.getMediaInfoJson(path)
-                json["isCancel"] = true
-                let jsonString = Utility.keyValueToJson(json)
-                return result(jsonString)
+        do {
+            try compositionvideoTrack.insertTimeRange(vidTimerange, of: videoTrack, at: CMTime.zero)
+            if let audioAssetTrack = vidAsset.tracks(withMediaType: .audio).first,
+               let compositionAudioTrack = composition.addMutableTrack(
+                       withMediaType: .audio,
+                       preferredTrackID: kCMPersistentTrackID_Invalid) {
+                try compositionAudioTrack.insertTimeRange(
+                        vidTimerange,
+                        of: audioAssetTrack,
+                        at: .zero)
             }
-            if deleteOrigin {
-                timer.invalidate()
-                let fileManager = FileManager.default
-                do {
-                    if fileManager.fileExists(atPath: path) {
-                        try fileManager.removeItem(atPath: path)
-                    }
-                    self.exporter = nil
-                    self.stopCommand = false
-                } catch let error as NSError {
-                    print(error)
+        } catch {
+            print(error)
+            result(FlutterError(code: "video_processing_failed",
+                    message: "video processing is failed.",
+                    details: nil))
+            return
+        }
+
+        compositionvideoTrack.preferredTransform = videoTrack.preferredTransform
+        let size = videoTrack.naturalSize
+        var filters = [CALayer]()
+        for (key, value) in processing {
+            switch key {
+            case "Filter":
+                guard let type = value["type"] as? String else {
+                    print("not found value")
+                    result(FlutterError(code: "processing_data_invalid",
+                            message: "one Filter member is not found.",
+                            details: nil))
+                    return
                 }
+                let filter = Filter(type: type)
+                let layer = CALayer()
+                layer.backgroundColor = UIColor(hex: filter.type.replacingOccurrences(of: "#", with: "")).cgColor
+                layer.opacity = 0.5
+                layer.frame = CGRect(x: 0, y: 0, width: size.width, height: size.height)
+                filters.append(layer)
+
+            case "TextOverlay":
+                guard let text = value["text"] as? String,
+                      let x = value["x"] as? NSNumber,
+                      let y = value["y"] as? NSNumber,
+                      let textSize = value["size"] as? NSNumber,
+                      let color = value["color"] as? String else {
+                    print("not found text overlay")
+                    result(FlutterError(code: "processing_data_invalid",
+                            message: "one TextOverlay member is not found.",
+                            details: nil))
+                    return
+                }
+                let textOverlay = TextOverlay(text: text, x: x, y: y, size: textSize, color: color)
+                let titleLayer = CALayer()
+                let uiImage = imageWith(name: textOverlay.text, width: size.width, height: size.width, size: textOverlay.size.intValue, color: UIColor(hex: textOverlay.color.replacingOccurrences(of: "#", with: "")))
+                titleLayer.contents = uiImage?.cgImage
+                print(uiImage?.size)
+                titleLayer.frame = CGRect(x: CGFloat(textOverlay.x.intValue), y: size.height - CGFloat(textOverlay.y.intValue) - uiImage!.size.height,
+                        width: uiImage!.size.width, height: uiImage!.size.height)
+                filters.append(titleLayer)
+            case "ImageOverlay":
+                guard let bitmap = value["bitmap"] as? FlutterStandardTypedData,
+                      let x = value["x"] as? NSNumber,
+                      let y = value["y"] as? NSNumber else {
+                    print("not found image overlay")
+                    result(FlutterError(code: "processing_data_invalid",
+                            message: "one ImageOverlay member is not found.",
+                            details: nil))
+                    return
+                }
+                let imageOverlay = ImageOverlay(bitmap: bitmap.data, x: x, y: y)
+                let datos: Data = imageOverlay.bitmap
+                let image = UIImage(data: datos)
+                let imglayer = CALayer()
+                imglayer.contents = image?.cgImage
+                guard let imageWidth: CGFloat = image?.size.width else {
+                    result(FlutterError(code: "video_processing_failed",
+                            message: "video processing is failed.",
+                            details: nil))
+                    return
+                }
+                guard let imageHeight: CGFloat = image?.size.height else {
+                    result(FlutterError(code: "video_processing_failed",
+                            message: "video processing is failed.",
+                            details: nil))
+                    return
+                }
+                imglayer.frame = CGRect(x: CGFloat(imageOverlay.x.intValue), y: size.height - CGFloat(imageOverlay.y.intValue) - imageHeight, width: imageWidth, height: imageHeight)
+                imglayer.opacity = 1
+                filters.append(imglayer)
+            default:
+                print("Not implement filter name")
             }
-            var json = self.getMediaInfoJson(compressionUrl.absoluteString)
-            json["isCancel"] = false
-            let jsonString = Utility.keyValueToJson(json)
-            result(jsonString)
+        }
+        let videolayer = CALayer()
+        videolayer.frame = CGRect(x: 0, y: 0, width: size.width, height: size.height)
+        let parentlayer = CALayer()
+        parentlayer.frame = CGRect(x: 0, y: 0, width: size.width, height: size.height)
+        parentlayer.addSublayer(videolayer)
+        for item in filters {
+            parentlayer.addSublayer(item)
+        }
+        let layercomposition = AVMutableVideoComposition()
+        layercomposition.frameDuration = CMTime(value: 1, timescale: 30)
+        layercomposition.renderSize = size
+        layercomposition.animationTool = AVVideoCompositionCoreAnimationTool(postProcessingAsVideoLayer: videolayer, in: parentlayer)
+
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = CMTimeRangeMake(start: CMTime.zero, duration: composition.duration)
+        let layerinstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionvideoTrack)
+        instruction.layerInstructions = [layerinstruction]
+        layercomposition.instructions = [instruction]
+
+        let movieFilePath = destPath
+        let movieDestinationUrl = URL(fileURLWithPath: movieFilePath)
+        print(movieDestinationUrl)
+        guard let assetExport = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
+            print("assertExport error")
+            result(FlutterError(code: "video_processing_failed",
+                    message: "video processing is failed.",
+                    details: nil))
+            return
+        }
+        assetExport.outputFileType = AVFileType.mp4
+        assetExport.videoComposition = layercomposition
+
+        do { // delete old video
+            try FileManager.default.removeItem(at: movieDestinationUrl)
+        } catch {
+        }
+
+        assetExport.outputURL = movieDestinationUrl
+        assetExport.exportAsynchronously(completionHandler: {
+            switch assetExport.status {
+            case AVAssetExportSession.Status.failed:
+                print("failed \(String(describing: assetExport.error))")
+            case AVAssetExportSession.Status.cancelled:
+                print("cancelled \(String(describing: assetExport.error))")
+            default:
+                print("Movie complete")
+                result(nil)
+
+            }
         })
     }
 
-    private func compressVideoPartially(_ path: String, _ quality: NSNumber, _ deleteOrigin: Bool, _ startTime: Double?,
-                                        _ duration: Double?, _ includeAudio: Bool?,
-                                        _ result: @escaping FlutterResult) {
-        let sourceVideoUrl = Utility.getPathUrl(path)
-        let sourceVideoType = "mp4"
-
-        let sourceVideoAsset = avController.getVideoAsset(sourceVideoUrl)
-        let sourceVideoTrack = avController.getTrack(sourceVideoAsset)
-
-        let compressionUrl =
-                Utility.getPathUrl("\(Utility.basePath())/\(Utility.getFileName(path)).\(sourceVideoType)")
-
-        let timescale = sourceVideoAsset.duration.timescale
-
-        let videoDuration = sourceVideoAsset.duration.seconds
-        let maxDurationTime = (duration ?? videoDuration < videoDuration ? duration : videoDuration) ?? videoDuration
-
-        let cmStartTime = CMTimeMakeWithSeconds(0, preferredTimescale: timescale)
-        let cmDurationTime = CMTimeMakeWithSeconds(maxDurationTime, preferredTimescale: timescale)
-        let timeRange: CMTimeRange = CMTimeRangeMake(start: cmStartTime, duration: cmDurationTime)
-
-        let isIncludeAudio = includeAudio != nil ? includeAudio! : true
-
-        let session = getComposition(isIncludeAudio, timeRange, sourceVideoTrack!)
-
-        let exporter = AVAssetExportSession(asset: session, presetName: getExportPreset(quality))!
-
-        exporter.outputURL = compressionUrl
-        exporter.outputFileType = AVFileType.mp4
-        exporter.shouldOptimizeForNetworkUse = true
-        exporter.timeRange = timeRange
-
-
-        Utility.deleteFile(compressionUrl.absoluteString)
-
-        let timer = Timer.scheduledTimer(timeInterval: 0.1, target: self, selector: #selector(self.updateProgress),
-                userInfo: exporter, repeats: true)
-
-        exporter.exportAsynchronously(completionHandler: {
-            if (self.stopCommand) {
-                timer.invalidate()
-                self.stopCommand = false
-                var json = self.getMediaInfoJson(path)
-                json["isCancel"] = true
-                let jsonString = Utility.keyValueToJson(json)
-                return result(jsonString)
-            }
-            if deleteOrigin {
-                timer.invalidate()
-                let fileManager = FileManager.default
-                do {
-                    if fileManager.fileExists(atPath: path) {
-                        try fileManager.removeItem(atPath: path)
-                    }
-                    self.exporter = nil
-                    self.stopCommand = false
-                } catch let error as NSError {
-                    print(error)
-                }
-            }
-            var json = self.getMediaInfoJson(compressionUrl.absoluteString)
-            json["isCancel"] = false
-            let jsonString = Utility.keyValueToJson(json)
-            result(jsonString)
-        })
+    private func imageWith(name: String, width: CGFloat, height: CGFloat, size: Int, color: UIColor) -> UIImage? {
+        let frame = CGRect(x: 0, y: 0, width: width, height: CGFloat(size))
+        let nameLabel = UILabel(frame: frame)
+        nameLabel.textAlignment = .left
+        nameLabel.backgroundColor = UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0)
+        nameLabel.textColor = color
+        nameLabel.font = UIFont.boldSystemFont(ofSize: CGFloat(size))
+        nameLabel.text = name
+        nameLabel.numberOfLines = 0
+        nameLabel.sizeToFit()
+        UIGraphicsBeginImageContext(frame.size)
+        if let currentContext = UIGraphicsGetCurrentContext() {
+            nameLabel.layer.render(in: currentContext)
+            let nameImage = UIGraphicsGetImageFromCurrentImageContext()
+            return nameImage
+        }
+        return nil
     }
+}
 
-    private func cancelCompression(_ result: FlutterResult) {
-        exporter?.cancelExport()
-        stopCommand = true
-        result("")
+extension UIColor {
+    convenience init(hex: String, alpha: CGFloat = 1.0) {
+        let v = Int("000000" + hex, radix: 16) ?? 0
+        let r = CGFloat(v / Int(powf(256, 2)) % 256) / 255
+        let g = CGFloat(v / Int(powf(256, 1)) % 256) / 255
+        let b = CGFloat(v / Int(powf(256, 0)) % 256) / 255
+        self.init(red: r, green: g, blue: b, alpha: min(max(alpha, 0), 1))
     }
+}
 
+struct Filter {
+    let type: String
+
+}
+
+struct ImageOverlay {
+    let bitmap: Data
+    let x: NSNumber
+    let y: NSNumber
+}
+
+struct TextOverlay {
+    let text: String
+    let x: NSNumber
+    let y: NSNumber
+    let size: NSNumber
+    let color: String
 }
